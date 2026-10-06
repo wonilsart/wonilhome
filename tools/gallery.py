@@ -22,7 +22,7 @@ SELF_NAMES = {"_wonil_"}
 # Frame size in the world. Every photo is PHOTO_H tall with its own width, so portraits stay portrait;
 # the caption strip under it is the same height everywhere so rows line up.
 PHOTO_H = 0.9        # meters
-CAPTION_H = 0.24     # meters
+CAPTION_H = 0.30     # meters (world/date line + two lines of names)
 MAX_W = 1.6          # meters; wider photos shrink to fit the column
 LONG_SIDE_PX = 1024  # photo resolution along its long side (downloads are uncompressed: ~3 MB each in memory)
 
@@ -81,6 +81,31 @@ class Fonts:
 FONTS = None
 
 
+def name_lines(people, size, max_w, max_lines, prefix):
+    """Wrap names over up to max_lines lines, separated by ' · '; '+N' closes the last line if names remain."""
+    lines, i = [], 0
+    for li in range(max_lines):
+        line = prefix if li == 0 else ""
+        first = True
+        while i < len(people):
+            last_line = li == max_lines - 1
+            more = len(people) - i - 1
+            candidate = line + ("" if first else " · ") + people[i]
+            tail = ("  +%d" % more) if (last_line and more) else ""
+            if FONTS.width(candidate + tail, size) > max_w:
+                if first:   # a single name longer than the line
+                    candidate = FONTS.fit(candidate, size, max_w - FONTS.width(tail, size))
+                    line, i, first = candidate, i + 1, False
+                break
+            line, i, first = candidate, i + 1, False
+        lines.append(line)
+        if i >= len(people):
+            break
+    if i < len(people):
+        lines[-1] += "  +%d" % (len(people) - i)
+    return lines, i
+
+
 # ---------- metadata ----------
 
 def vrcx_meta(path):
@@ -133,8 +158,8 @@ def render(entry):
     out = Image.new("RGB", (pw, ph + strip), (21, 22, 26))
     out.paste(photo, (0, 0))
     d = ImageDraw.Draw(out)
-    pad = round(strip * 0.12)
-    s1, s2 = round(strip * 0.30), round(strip * 0.22)
+    pad = round(strip * 0.10)
+    s1, s2 = round(strip * 0.24), round(strip * 0.176)
     inner = pw - 2 * pad
 
     # Undated art borrows its neighbor's date only for ordering, so don't print it.
@@ -142,12 +167,13 @@ def render(entry):
     # Narrow (portrait) frames: smaller text, and the date moves to the second line so the world name has room.
     narrow = pw < LONG_SIDE_PX * 0.7
     if narrow:
-        s1, s2 = round(strip * 0.21), round(strip * 0.16)
+        s1, s2 = round(strip * 0.168), round(strip * 0.128)
     date_w = FONTS.width(date, s2) if date and not narrow else 0
     title = entry.get("world") or entry.get("title") or ""
     title = FONTS.fit(title, s1, inner - date_w - (pad if date_w else 0), bold=True)
     y1 = ph + pad
-    y2 = y1 + s1 + round(strip * 0.10)
+    y2 = y1 + s1 + round(strip * 0.07)
+    y3 = y2 + s2 + round(strip * 0.05)
     FONTS.draw(d, (pad, y1), title, s1, (242, 239, 234), bold=True)
     if date and not narrow:
         FONTS.draw(d, (pw - pad - date_w, y1 + (s1 - s2) * 0.6), date, s2, (178, 172, 164))
@@ -155,9 +181,16 @@ def render(entry):
     people = entry.get("people", [])
     if narrow and date:
         FONTS.draw(d, (pad, y2), date, s2, (178, 172, 164))
-        if people:   # no room for names on a portrait frame; the count still says it was a group
+        if people:
             rest = FONTS.fit("  ·  %d friend%s" % (len(people), "" if len(people) == 1 else "s"), s2, inner - FONTS.width(date, s2))
             FONTS.draw(d, (pad + FONTS.width(date, s2), y2), rest, s2, (214, 208, 200))
+            lines, _ = name_lines(people, s2, inner, 1, "")
+            FONTS.draw(d, (pad, y3), lines[0], s2, (214, 208, 200))
+        people = []
+    if people:
+        lines, _ = name_lines(people, s2, inner, 2, "with ")
+        for i, line in enumerate(lines):
+            FONTS.draw(d, (pad, (y2, y3)[i]), line, s2, (214, 208, 200))
         people = []
     if people:
         line = "with "
